@@ -32,8 +32,8 @@ def init()->None:
     _setup_done = True
 @dataclass
 class RAGConfig:
-    embed_model:str = "text-embedding-v2"
-    embed_dim:int = 1536
+    embed_model:str = "text-embedding-v4"
+    embed_dim:int = 1024
     llm_model:str = "qwen-turbo"
     llm_temperature:float = 0.2
     llm_max_tokens:int = 1024
@@ -100,7 +100,7 @@ RAG_SYSTEM_PROMPT = """你是一个严谨的知识助手，只能根据下方提
 def build_prompt(question:str,sources:list[RetrievedChunk])->dict:
     docs_text_parts=[]
     for i,src in enumerate(sources,1):
-        docs_text_parts.append(f"[文档{i}] (相关度：{src.score:.2f}\n{src.content}")
+        docs_text_parts.append(f"[文档{i}] (相关度：{src.score:.2f})\n{src.content}")
     docs_text = "\n\n".join(docs_text_parts)
     user_message = (
         f"## 参考文档\n\n{docs_text}\n\n"
@@ -125,13 +125,15 @@ class Retriever:
     @property
     def chunk(self)->int:
         return self._indexed_count
-    def index(self,documents:list[Document])->int:
+    def index(self,documents:list[Document],incremental:bool = False)->int:
         if not documents:
             raise ValueError("文档列表不能为空")
+        if not incremental:
+            self._chunks = []
+            self._chunk_meta = []
+        old_count = len(self._chunks)
         logger.info(f"开始索引{len(documents)}篇文档")
         t0 = time.perf_counter()
-        self._chunks = []
-        self._chunk_meta = []
         for doc_idx , doc in enumerate(documents):
             chunks_for_doc = self._split_text(doc.content)
             for chunk in chunks_for_doc:
@@ -141,10 +143,13 @@ class Retriever:
                         {"doc_index": doc_idx,
                          "doc_metadata":doc.metadata}
                     )
+        new_chunks = self._chunks[old_count:]
+        if not new_chunks:
+            return len(self._chunks)
         logger.info(f"切割完成：{len(documents)}篇→{len(self._chunks)}chunks")
 
         try:
-            embeddings = self.embedder.embed_batch(self._chunks,text_type="document")
+            embeddings = self.embedder.embed_batch(new_chunks,text_type="document")
         except Exception as e:
             raise EmbeddingError(
                 f"批量向量化失败：{e}",
@@ -153,10 +158,11 @@ class Retriever:
         try:
             embeddings = np.array(embeddings,dtype=np.float32)
             faiss.normalize_L2(embeddings)
-            self._index = faiss.IndexFlatIP(self.config.embed_dim)
+            if not incremental or self._index is None:
+                self._index = faiss.IndexFlatIP(self.config.embed_dim)
             self._index.add(embeddings)
         except Exception as e:
-            raise RetrievalError(f"FAISS索引构建失败：{e}")from e
+            raise RetrievalError(f"FAISS索引构建失败：{e}") from e
         self._indexed_count = len(self._chunks)
         elapsed = (time.perf_counter() - t0)*1000
         logger.info(
@@ -193,6 +199,7 @@ class Retriever:
                 metadata=meta["doc_metadata"],
                 score=float(score),
                 doc_id=meta["doc_index"],
+                chunk_index=idx,
             ))
         logger.debug(
             f"检索'{query[:30]}...'→{len(results)}/{k}条结果"
@@ -200,26 +207,40 @@ class Retriever:
         )
         return results
     @staticmethod
-    def _split_text(text:str,max_len=500,overlap=50):
+    def _split_text(text:str,max_len=500,overlap=100):
         if len(text) <= max_len:
             return [text]
         import re
-        sentances = re.split(r'(?<=[？！。\n])',text)
+        paragraphs = re.split(r'\n\s*\n',text)
+        paragraphs = [p.strip() for p in paragraphs if p.strip()]
+        result = []
+        for para in paragraphs:
+            if len(para) <= max_len:
+                result.append(para)
+            else:
+                result.extend(Retriever._split_by_sentences(para,max_len,overlap))
+        return result
+
+
+    @staticmethod
+    def _split_by_sentences(text:str,max_len:int,overlap:int)->list[str]:
+        import re
+        sentences = re.split(r'(?<=[？！。\n])',text)
         chunks = []
         current =""
-        for sentance in sentances:
-            if len(sentance) > max_len:
+        for sentence in sentences:
+            if len(sentence) > max_len:
                 if current.strip():
                     chunks.append(current.strip())
-                for start in range(0,len(sentance),max_len - overlap):
-                    chunks.append(sentance[start:start + max_len].strip())
+                for start in range(0,len(sentence),max_len - overlap):
+                    chunks.append(sentence[start:start + max_len].strip())
                 current = ""
                 continue
-            if len(sentance) + len(current) > max_len:
+            if len(sentence) + len(current) > max_len:
                 chunks.append(current.strip())
-                current = current[-overlap:] + sentance if overlap > 0 else sentance
+                current = current[-overlap:] + sentence if overlap > 0 else sentence
             else:
-                current += sentance
+                current += sentence
         if current:
             chunks.append(current.strip())
         return chunks

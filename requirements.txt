@@ -13,9 +13,16 @@ python-dotenv>=1.0.0       # .env 环境变量管理
 # === 前端 ===
 streamlit>=1.28.0          # Web UI
 
-# === PDF 解析（至少装一个）===
-pdfplumber>=0.10.0         # 推荐：PDF 文本提取质量更高
-# PyPDF2>=3.0.0            # 备选：更轻量但提取质量一般
+# === RAG API（FastAPI 接口层，供 AI Agent 调用）===
+fastapi>=0.100.0           # Web 框架
+uvicorn[standard]>=0.23.0  # ASGI 服务器（启动 api.py 用）
+python-multipart>=0.0.6    # FastAPI 文件上传（UploadFile）依赖
+
+# === 多格式文档加载 ===
+pdfplumber>=0.10.0         # PDF 文本提取
+openpyxl>=3.1.0            # Excel (.xlsx) 加载
+python-docx>=1.1.0         # Word (.docx) 加载
+# PyPDF2>=3.0.0            # PDF 备选：更轻量但提取质量一般
 
 # === 可选 ===
 # ragas>=0.1.0             # RAG 评估框架（Day 6 用）

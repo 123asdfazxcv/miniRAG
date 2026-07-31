@@ -1,6 +1,6 @@
 # 🔬 MiniRAG — 从零构建的 RAG 实验平台
 
-一个**教学级** Retrieval-Augmented Generation (RAG) 系统，7 天从手写向量检索到完整 Streamlit 实验平台。适合学习 RAG 原理、面试准备、快速原型验证。
+一个**教学级** Retrieval-Augmented Generation (RAG) 系统，从手写向量检索到完整 Streamlit 实验平台。适合学习 RAG 原理、面试准备、快速原型验证。
 
 ## 🏗 系统架构
 
@@ -97,17 +97,6 @@ RAG/
 ├── requirements.txt     # 依赖清单
 └── .env.example         # 环境变量模板
 ```
-
-## 🧪 学习路径 (Day 1-7)
-
-| Day | 内容 | 核心文件 |
-|-----|------|---------|
-| 1-2 | Embedding + 语义搜索 + 文档切割 | `embedding.py`, `chunking.py` |
-| 3 | FAISS / ChromaDB 向量数据库 | `vectordb.py` |
-| 4 | 端到端 RAG 系统 (Ingest → Retrieve → Generate) | `minirag.py` |
-| 5 | 检索优化: MMR / HyDE / BM25 / Hybrid | `retrieval.py` |
-| 6 | RAGAS 评估 + LLM Reranker + MultiQuery | `RAGAS.py` |
-| 7 | Streamlit 全功能实验平台 | `app.py`, `ui/` |
 
 ## 🎯 检索策略对比
 

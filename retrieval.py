@@ -12,8 +12,6 @@ from pathlib import Path
 from typing import Optional
 from dataclasses import dataclass,field
 
-
-
 _PROJECT_DIR = Path(__file__).resolve().parent
 if str(_PROJECT_DIR) not in sys.path:
     sys.path.append(str(_PROJECT_DIR))
@@ -239,8 +237,9 @@ class BM25Retriever:
     def index(self,documents:list[Document])->int:
         self._chunks=[]
         self._chunk_meta=[]
+        chunk_size = 500
         for doc_idx,doc in enumerate(documents):
-            if len(doc.content) <= 300:
+            if len(doc.content) <= chunk_size:
                 chunks_for_doc = [doc.content]
             else:
                 import re
@@ -248,7 +247,7 @@ class BM25Retriever:
                 chunks_for_doc = []
                 current=""
                 for sentence in sentences:
-                    if len(sentence) + len(current) > 300:
+                    if len(sentence) + len(current) > chunk_size:
                         chunks_for_doc.append(current.strip())
                         current = sentence
                     else:
@@ -344,7 +343,7 @@ class HybridRetriever:
         )
         return results
 class EnhancedMiniRAG(MiniRAG):
-    STRATEGIES = ("default","mmr","hyde","hybrid","rerank","full")
+    STRATEGIES = ("default","mmr","hyde","hybrid","rerank","multiq","full")
     def __init__(self,config:Optional[RAGConfig] = None,strategy:str = "default",
                  mmr_lambda:float=0.7,hybrid_alpha:float=0.3):
         init()

@@ -141,15 +141,15 @@ class MultiQueryRetriever:
     def search(self,query:str,top_k:int=3)->list[RetrievedChunk]:
         variants = self._generate_variants(query)
         logger.info("MultiQuery: 原始「%s」→ %d 个变体", query[:40], len(variants) - 1)
-        all_chunks:dict[str,RetrievedChunk] = {}
+        all_chunks:dict[int,RetrievedChunk] = {}
         for vi,variant in enumerate(variants):
-            results = self.base_retriever.search(variant,top_k=top_k)
+            results = self.base_retriever.retrieve(variant,top_k=top_k)
             logger.debug(
                 "  [%d/%d] 「%s」→ %d 条结果",
                 vi + 1, len(variants), variant[:30], len(results)
             )
             for chunk in results:
-                chunk_id = chunk.chunk_id
+                chunk_id = chunk.chunk_index
                 if chunk_id not in all_chunks or chunk.score > all_chunks[chunk_id].score:
                     all_chunks[chunk_id] = chunk
                     if "matched_queries" not in chunk.metadata:
@@ -326,10 +326,10 @@ class Day6MiniRAG(EnhancedMiniRAG):
         self._day6_reranker:Optional[LLMReranker]=None
         self._day6_multiq_retriever:Optional[MultiQueryRetriever]=None
         if strategy in ("rerank","full"):
-            self._day6_reranker = LLMReranker(config)
+            self._day6_reranker = LLMReranker(RerankerConfig(model=config.llm_model))
         if strategy in ("multiq","full"):
             self._day6_multiq_retriever = MultiQueryRetriever(
-                base_retriever=None,config=config
+                base_retriever=None,config=MultiQueryConfig(model=config.llm_model)
             )
         super().__init__(config,strategy=strategy,**kwargs)
     def ingest(self,documents:list[Document])->int:
@@ -337,27 +337,50 @@ class Day6MiniRAG(EnhancedMiniRAG):
         if self._day6_multiq_retriever is not None:
             self._day6_multiq_retriever.base_retriever = self.retriever
         return count
-    def _retrieve(self,query:str)->list[RetrievedChunk]:
+    def _retrieve(self,query:str,top_k:Optional[int]=None)->list[RetrievedChunk]:
         if self.strategy in ("default","mmr","hyde","hybrid"):
-            return super().retriever(query)
+            return self.retriever.retrieve(query,top_k=top_k)
         if self.strategy == "rerank" and self._day6_reranker:
-            candidates = self.retriever.search(
+            candidates = self.retriever.retrieve(
                 query,top_k=self._day6_reranker.config.candidates_k
             )
             return self._day6_reranker.rerank(query,candidates)
         if self.strategy == "multiq" and self._day6_multiq_retriever:
             return self._day6_multiq_retriever.search(
-                query,top_k=self.config.top_k
+                query,top_k=top_k or self.config.top_k
             )
         if self.strategy == "full" and self._day6_multiq_retriever:
             candidates = self._day6_multiq_retriever.search(
                 query,top_k=self._day6_reranker.config.candidates_k
-                if self._day6_reranker else self.config.top_k
+                if self._day6_reranker else (top_k or self.config.top_k)
             )
             if self._day6_reranker and len(candidates)> self.config.top_k:
                 return self._day6_reranker.rerank(query,candidates)
             return candidates[:self.config.top_k]
-        return super()._retrieve(query)
+        return self.retriever.retrieve(query,top_k=top_k)
+    def ask(self,question:str,top_k:Optional[int]=None)->RAGResponse:
+        t0 = time.perf_counter()
+        logger.info(f"查询:{question}")
+        try:
+            sources = self._retrieve(question,top_k=top_k)
+            if not sources:
+                return RAGResponse(
+                    answer="根据提供的文档，无法回答此问题",
+                    sources=[],
+                    token_usage={"input":0,"output":0,"total":0},
+                    elapsed_ms=(time.perf_counter()-t0) * 1000
+                )
+            answer , token_usage = self.generator.generate(question,sources)
+        except Exception as e:
+            logger.error(f"查询失败:'{question[:50]}...'",exc_info=True)
+            raise
+        elapsed = (time.perf_counter() - t0) * 1000
+        return RAGResponse(
+            answer=answer,
+            sources=sources,
+            token_usage=token_usage,
+            elapsed_ms=elapsed
+        )
 EVAL_DOCUMENTS = TEST_DOCUMENTS + [
     Document(
         content=(
